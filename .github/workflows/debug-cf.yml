@@ -1,6 +1,9 @@
 name: Debug CF Token
 
 on:
+  push:
+    branches:
+      - debug/cf-token
   workflow_dispatch:
 
 permissions:
