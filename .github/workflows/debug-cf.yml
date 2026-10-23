@@ -1,0 +1,54 @@
+name: Debug CF Token
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - name: Diagnose token
+        run: |
+          set -e
+          LEN=${#CLOUDFLARE_API_TOKEN}
+          HASH=$(printf '%s' "$CLOUDFLARE_API_TOKEN" | sha256sum | cut -d' ' -f1)
+          echo "Secret length: $LEN (expected 53)"
+          echo "Secret sha256: $HASH"
+          echo "Expected sha256: e04f03cbc7d57318fba275568a85cc7b6e533f5d796f5518f4095a50fb38ca6a"
+          echo "--- GET /accounts (no CT header) ---"
+          curl -s -o /tmp/a.json -w "HTTP %{http_code}\n" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts?per_page=50&page=1"
+          head -c 400 /tmp/a.json; echo
+          echo "--- GET /accounts (with CT header, same as deploy script) ---"
+          curl -s -o /tmp/b.json -w "HTTP %{http_code}\n" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            "https://api.cloudflare.com/client/v4/accounts?per_page=50&page=1"
+          head -c 400 /tmp/b.json; echo
+          echo "--- GET /accounts/{id}/workers/scripts ---"
+          curl -s -o /tmp/c.json -w "HTTP %{http_code}\n" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts"
+          head -c 400 /tmp/c.json; echo
+          echo "--- node fetch replication (same as deploy script) ---"
+          node -e '
+            const token = process.env.CLOUDFLARE_API_TOKEN;
+            fetch(`https://api.cloudflare.com/client/v4/accounts/97e1240071539ed8c57e59e9288ef2a8/workers/scripts`, {
+              method: "GET",
+              headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+              signal: AbortSignal.timeout(30000),
+            }).then(async (r) => {
+              console.log("node fetch HTTP", r.status);
+              const body = await r.text();
+              console.log(body.slice(0, 400));
+            });
+          '
